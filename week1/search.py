@@ -94,7 +94,7 @@ def query():
     print("query obj: {}".format(query_obj))
 
     #### Step 4.b.ii
-    response = None   # TODO: Replace me with an appropriate call to OpenSearch
+    response = opensearch.search(body=query_obj, index="bbuy_products")   # TODO: Replace me with an appropriate call to OpenSearch
     # Postprocess results here if you so desire
 
     #print(response)
@@ -110,12 +110,86 @@ def create_query(user_query, filters, sort="_score", sortDir="desc"):
     print("Query: {} Filters: {} Sort: {}".format(user_query, filters, sort))
     query_obj = {
         'size': 10,
+        "highlight": {
+            "fields": {
+                "name": {},
+                "shortDescription": {},
+                "longDescription": {}
+            }
+        },
+        "sort":[
+            {sort: {"order": sortDir}}
+        ],
         "query": {
-            "match_all": {} # Replace me with a query that both searches and filters
+            # "match_all": {} # Replace me with a query that both searches and filters
+            "function_score": {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "query_string": {
+                                    "query": user_query,
+                                    "fields": ["name^100", "shortDescription^50", "longDescription^10", "department"],
+                                    "phrase_slop": 3
+                                }
+                            }
+                        ],
+                        "filter": filters  
+                    }
+                },
+                "functions": [
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankShortTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankMediumTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
+                        }
+                    },
+                    {
+                        "field_value_factor": {
+                            "field": "salesRankLongTerm",
+                            "missing": 100000000,
+                            "modifier": "reciprocal"
+                        }
+                    }
+                ],
+                "score_mode": "avg",
+                "boost_mode": "multiply"
+            }
         },
         "aggs": {
             #### Step 4.b.i: create the appropriate query and aggregations here
-
+            "regularPrice": {
+                "range": {
+                    "field": "regularPrice",
+                    "ranges": [
+                        {"key": "$", "to": 100},
+                        {"key": "$$", "from": 100, "to": 200},
+                        {"key": "$$$", "from": 200, "to": 300},
+                        {"key": "$$$$", "from": 300, "to": 400},
+                        {"key": "$$$$$", "from": 400, "to": 500},
+                        {"key": "$$$$$$", "from": 500},
+                    ]
+                }
+            },
+            "department": {
+                "terms": {
+                    "field": "department.keyword",
+                    "min_doc_count": 0
+                }
+            },
+            "missing_images": {
+                "missing": {
+                    "field": "image"
+                }
+            }
         }
     }
     return query_obj
